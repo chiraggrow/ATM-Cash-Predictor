@@ -1,0 +1,17 @@
+.git
+.gitignore
+.env
+.venv
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+node_modules
+dist
+artifacts
+reports
+.DS_Store
+.ipynb_checkpoints
+*.ipynb
+tests
+README.md

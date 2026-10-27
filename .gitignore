@@ -1,2 +1,15 @@
+.env
+.venv/
 node_modules/
 dist/
+artifacts/
+reports/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+.ipynb_checkpoints/

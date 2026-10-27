@@ -1,0 +1,135 @@
+{
+  "family": "atm-cash-intelligence",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/atmCashIntelligenceTaskRole",
+  "runtimePlatform": {
+    "operatingSystemFamily": "LINUX",
+    "cpuArchitecture": "X86_64"
+  },
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/atm-cash-api:<TAG>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "ENVIRONMENT",
+          "value": "production"
+        },
+        {
+          "name": "ADMIN_USERNAME",
+          "value": "atm-admin"
+        },
+        {
+          "name": "ACCESS_TOKEN_EXPIRE_MINUTES",
+          "value": "30"
+        },
+        {
+          "name": "CORS_ORIGINS",
+          "value": "https://atm.example.com"
+        },
+        {
+          "name": "DATASET_PATH",
+          "value": "/app/data/atm_cash.csv"
+        },
+        {
+          "name": "MODEL_ARTIFACT_PATH",
+          "value": "/app/artifacts/atm-demand.joblib"
+        },
+        {
+          "name": "TARGET_ACCURACY_PCT",
+          "value": "85"
+        },
+        {
+          "name": "MODEL_TEST_SIZE",
+          "value": "0.2"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:atm-cash/database-url"
+        },
+        {
+          "name": "JWT_SECRET_KEY",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:atm-cash/jwt-secret"
+        },
+        {
+          "name": "ADMIN_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:atm-cash/admin-password"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 120
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/atm-cash-intelligence",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    },
+    {
+      "name": "web",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/atm-cash-web:<TAG>",
+      "essential": true,
+      "dependsOn": [
+        {
+          "containerName": "api",
+          "condition": "HEALTHY"
+        }
+      ],
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "API_UPSTREAM",
+          "value": "127.0.0.1:8000"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1/healthz >/dev/null 2>&1 || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 15
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/atm-cash-intelligence",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "web"
+        }
+      }
+    }
+  ]
+}
