@@ -5,9 +5,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.database import Base, build_engine
 from app.main import create_app
+from app.models import ATM, ATMObservation
 
 DATASET_COLUMNS = [
     "ATM_ID",
@@ -33,7 +36,7 @@ DATASET_COLUMNS = [
 @pytest.fixture
 def dataset_path(tmp_path: Path) -> Path:
     path = tmp_path / "atm_cash.csv"
-    start = date(2023, 1, 1)
+    start = date.today() - timedelta(days=79)
     with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=DATASET_COLUMNS)
         writer.writeheader()
@@ -72,17 +75,78 @@ def dataset_path(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def test_client(dataset_path: Path, tmp_path: Path):
+    app = create_test_app(dataset_path, tmp_path)
+    with TestClient(app) as client:
+        yield client
+
+
+def create_test_app(
+    dataset_path: Path,
+    tmp_path: Path,
+    *,
+    forecast_mode: str = "production",
+    operational_data_source: str = "test_fixture",
+):
+    """Load API fixtures into the database's unique ATM/date grain."""
+    database_url = f"sqlite:///{tmp_path / 'test.db'}"
     settings = Settings(
-        database_url=f"sqlite:///{tmp_path / 'test.db'}",
+        database_url=database_url,
         jwt_secret_key=SecretStr("test-secret-key-that-is-at-least-32-characters-long"),
         admin_username="test-admin",
         admin_password=SecretStr("test-admin-password-2026"),
         cors_origins="http://localhost:5173",
         dataset_path=dataset_path,
         model_artifact_path=tmp_path / "artifacts" / "test-model.joblib",
+        operational_data_source=operational_data_source,
+        forecast_mode=forecast_mode,
+        create_schema_on_startup=True,
     )
-    with TestClient(create_app(settings)) as client:
-        yield client
+    engine = build_engine(database_url)
+    Base.metadata.create_all(bind=engine)
+    unique_rows = {}
+    with dataset_path.open(encoding="utf-8") as file:
+        for row in csv.DictReader(file):
+            unique_rows[(row["ATM_ID"], date.fromisoformat(row["Date"]))] = row
+    with Session(engine) as session:
+        for atm_id in sorted({atm_id for atm_id, _ in unique_rows}):
+            atm_rows = [
+                row for (row_atm_id, _), row in unique_rows.items() if row_atm_id == atm_id
+            ]
+            first = atm_rows[0]
+            session.add(
+                ATM(
+                    atm_id=atm_id,
+                    location_name=first["Location_Type"],
+                    location_type=first["Location_Type"],
+                    capacity=float(first["ATM_Capacity"]),
+                    data_source=operational_data_source,
+                )
+            )
+        session.flush()
+        for (atm_id, observed_on), row in unique_rows.items():
+            session.add(
+                ATMObservation(
+                    atm_id=atm_id,
+                    observed_on=observed_on,
+                    total_withdrawals=float(row["Total_Withdrawals"]),
+                    total_deposits=float(row["Total_Deposits"]),
+                    withdrawal_transactions=10,
+                    deposit_transactions=0,
+                    opening_cash_balance=float(row["Previous_Day_Cash_Level"]),
+                    closing_cash_balance=float(row["ATM_Balance"]),
+                    replenishment_amount=float(row["Replenishment_Amount"]),
+                    next_day_demand=float(row["Cash_Demand_Next_Day"]),
+                    nearby_competitor_atms=int(row["Nearby_Competitor_ATMs"]),
+                    time_of_day=row["Time_of_Day"],
+                    data_source=operational_data_source,
+                    holiday_flag=bool(int(row["Holiday_Flag"])),
+                    special_event_flag=bool(int(row["Special_Event_Flag"])),
+                    weather_condition=row["Weather_Condition"],
+                )
+            )
+        session.commit()
+    engine.dispose()
+    return create_app(settings)
 
 
 @pytest.fixture

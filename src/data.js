@@ -13,7 +13,20 @@ export function clearAccessToken() {
   sessionStorage.removeItem(accessTokenKey);
 }
 
-export async function apiRequest(path, { token, ...options } = {}) {
+function requestSignal(signal) {
+  const timeoutSignal = AbortSignal.timeout(20_000);
+  if (!signal) return timeoutSignal;
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([signal, timeoutSignal]);
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  timeoutSignal.addEventListener("abort", abort, { once: true });
+  return controller.signal;
+}
+
+export async function apiRequest(path, { token, signal, ...options } = {}) {
   const headers = new Headers(options.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
@@ -22,9 +35,12 @@ export async function apiRequest(path, { token, ...options } = {}) {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       headers,
-      signal: AbortSignal.timeout(20_000),
+      signal: requestSignal(signal),
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
     if (error instanceof TypeError) {
       throw new Error("Unable to reach the API. Start the backend and try again.");
     }
@@ -32,6 +48,9 @@ export async function apiRequest(path, { token, ...options } = {}) {
       throw new Error("The API request timed out. Check the backend and retry.");
     }
     throw error;
+  }
+  if (response.status === 401 && token && typeof window !== "undefined") {
+    window.dispatchEvent(new Event("cashcast:unauthorized"));
   }
   const isJson = response.headers.get("content-type")?.includes("application/json");
   const body = response.status === 204 || !isJson ? null : await response.json();

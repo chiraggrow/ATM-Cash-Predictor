@@ -53,6 +53,14 @@
         {
           "name": "MODEL_TEST_SIZE",
           "value": "0.2"
+        },
+        {
+          "name": "MAX_FORECAST_DATA_AGE_DAYS",
+          "value": "1"
+        },
+        {
+          "name": "FORECAST_MODE",
+          "value": "production"
         }
       ],
       "secrets": [

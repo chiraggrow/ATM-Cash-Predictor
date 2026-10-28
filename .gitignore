@@ -1,4 +1,7 @@
 .env
+*.db
+*.sqlite
+*.sqlite3
 .venv/
 node_modules/
 dist/

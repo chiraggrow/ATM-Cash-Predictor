@@ -17,6 +17,7 @@ COPY backend/app /app/app
 COPY backend/migrations /app/migrations
 COPY backend/alembic.ini /app/alembic.ini
 COPY atm_cash.csv /app/data/atm_cash.csv
+COPY data/generated/atm_cash_10k.csv /app/data/generated/atm_cash_10k.csv
 
 RUN mkdir -p /app/artifacts && chown -R app:app /app
 USER app

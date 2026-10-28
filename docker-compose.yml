@@ -2,9 +2,9 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-atm_user}
+      POSTGRES_USER: ${POSTGRES_USER:-atm_cash_app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-atm_cash}
+      POSTGRES_DB: ${POSTGRES_DB:-atm_cash_predictor}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -14,27 +14,58 @@ services:
       retries: 20
     restart: unless-stopped
 
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-atm_cash_app}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-atm_cash_predictor}
+      PYTHONPATH: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  seed:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "app.seed_database", "--csv", "/app/data/generated/atm_cash_10k.csv"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-atm_cash_app}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-atm_cash_predictor}
+      PYTHONPATH: /app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
   api:
     build:
       context: .
       dockerfile: backend/Dockerfile
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-atm_cash_app}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-atm_cash_predictor}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:8080,http://localhost:5173}
       DATASET_PATH: /app/data/atm_cash.csv
+      OPERATIONAL_DATA_SOURCE: ${OPERATIONAL_DATA_SOURCE:-synthetic_simulation}
       MODEL_ARTIFACT_PATH: /app/artifacts/atm-demand.joblib
       TARGET_ACCURACY_PCT: ${TARGET_ACCURACY_PCT:-85}
       MODEL_TEST_SIZE: ${MODEL_TEST_SIZE:-0.2}
+      MAX_FORECAST_DATA_AGE_DAYS: ${MAX_FORECAST_DATA_AGE_DAYS:-1}
+      FORECAST_MODE: ${FORECAST_MODE:-production}
     volumes:
       - model_artifacts:/app/artifacts
     depends_on:
       db:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
